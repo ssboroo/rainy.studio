@@ -234,7 +234,30 @@ select(medium,false);motion(false);
  ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(5,34);ctx.bezierCurveTo(12,0,76,0,83,34);ctx.quadraticCurveTo(72,26,63,35);ctx.quadraticCurveTo(53,27,44,35);ctx.quadraticCurveTo(34,27,25,35);ctx.quadraticCurveTo(15,27,5,34);ctx.closePath();ctx.fill();
  ctx.strokeStyle=shade;ctx.lineWidth=.65;ctx.beginPath();ctx.moveTo(44,9);ctx.quadraticCurveTo(30,15,25,34);ctx.moveTo(44,9);ctx.quadraticCurveTo(58,15,63,34);ctx.stroke();ctx.restore();
  }
- function tick(now){frame=0;if(!root.isConnected)return;const dt=last?Math.min((now-last)/1000,.05):0;last=now;const moving=root.dataset.motion==='on'&&!reduced&&!held&&!opened;if(visible&&moving)clock+=dt;const bounds=track.getBoundingClientRect(),space=Math.max(0,bounds.width-64),x=.5+.46*Math.sin(clock*.11-.85),direction=Math.cos(clock*.11-.85)>=0?1:-1;button.style.left=(space*x)+'px';button.style.top=(4+Math.sin(clock*.27)*2)+'px';button.style.transform=`translateY(${Math.sin(clock*1.4)*3}px) rotate(${Math.sin(clock*.85)*2}deg)`;if(visible)draw(clock,direction);if(visible)frame=requestAnimationFrame(tick);}
+ let lastPosition=null;
+ function safePosition(desired,bounds){
+  const bw=button.getBoundingClientRect().width||44,bh=button.getBoundingClientRect().height||58,gap=12;
+  const maxX=Math.max(0,bounds.width-bw-gap),maxY=Math.max(0,bounds.height-bh-gap);
+  const obstacles=Array.from(root.querySelectorAll('.ri-selected,.ri-portal,.ri-engine-strip,.ri-nav,.ri-arrow,.ri-bottom-left,.ri-bottom-center,.ri-motion'))
+   .filter(n=>!n.hidden).map(n=>n.getBoundingClientRect()).filter(b=>b.width&&b.height)
+   .map(b=>({x:b.left-bounds.left-gap,y:b.top-bounds.top-gap,right:b.right-bounds.left+gap,bottom:b.bottom-bounds.top+gap}));
+  function allowed(p){return p.x>=gap&&p.y>=gap&&p.x<=maxX&&p.y<=maxY&&!obstacles.some(b=>p.x+bw>b.x&&p.x<b.right&&p.y+bh>b.y&&p.y<b.bottom);}
+  desired={x:Math.min(maxX,Math.max(gap,desired.x)),y:Math.min(maxY,Math.max(gap,desired.y))};
+  if(allowed(desired))return desired;
+  const xs=[gap,maxX,desired.x],ys=[gap,maxY,desired.y];
+  for(const b of obstacles){xs.push(b.x-bw-1,b.right+1);ys.push(b.y-bh-1,b.bottom+1);}
+  let best=null,score=Infinity;
+  for(const x of xs)for(const y of ys){const candidate={x,y};if(!allowed(candidate))continue;const distance=(x-desired.x)**2+(y-desired.y)**2;const continuity=lastPosition?((x-lastPosition.x)**2+(y-lastPosition.y)**2)*.15:0;if(distance+continuity<score){score=distance+continuity;best=candidate;}}
+  return best;
+ }
+ function tick(now){frame=0;if(!root.isConnected)return;const dt=last?Math.min((now-last)/1000,.05):0;last=now;const moving=root.dataset.motion==='on'&&!reduced&&!held&&!opened;if(visible&&moving)clock+=dt;
+  const bounds=track.getBoundingClientRect(),x=.5+.46*Math.sin(clock*.11-.85),direction=Math.cos(clock*.11-.85)>=0?1:-1;
+  const target=safePosition({x:Math.max(0,bounds.width-44)*x,y:bounds.height-110+Math.sin(clock*.27)*6},bounds);
+  button.style.visibility=target?'visible':'hidden';
+  if(target){lastPosition=target;button.style.left=target.x+'px';button.style.top=target.y+'px';button.style.transform='none';}
+  if(visible)draw(clock,direction);if(visible)frame=requestAnimationFrame(tick);
+ }
+
  function start(){if(!frame){last=0;frame=requestAnimationFrame(tick);}}new IntersectionObserver(e=>{visible=e[0].isIntersecting;if(visible)start();else{cancelAnimationFrame(frame);frame=0;}},{threshold:.01}).observe(world);draw(0,1);start();
 })();
 
@@ -352,5 +375,6 @@ html,body{height:100%;overflow:hidden}
 #rainy-immersive .ri-walker-canvas{width:30px;height:45px;margin:0 auto}
 @media(max-width:700px){#rainy-immersive .ri-walker{width:44px;height:50px}#rainy-immersive .ri-walker-canvas{width:26px;height:39px}}
 </style>
+<style>#rainy-immersive .ri-walker-track{inset:0!important;height:auto!important}</style>
 </body>
 </html>
