@@ -219,7 +219,7 @@ select(medium,false);motion(false);
  const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;let clock=0,last=0,frame=0,visible=true,held=false,opened=false;const inertState=new Map();
  function message(open){opened=open;panel.hidden=!open;button.setAttribute('aria-expanded',String(open));if(open){for(const node of world.children){if(node!==panel){inertState.set(node,node.inert);node.inert=true;}}close.focus();if(!reduced&&root.dataset.motion==='on')panel.animate([{opacity:0,transform:'translateY(12px)'},{opacity:1,transform:'translateY(0)'}],{duration:420,easing:'cubic-bezier(.2,.8,.2,1)'});}else{for(const [node,value] of inertState)node.inert=value;inertState.clear();button.focus();}}
  button.addEventListener('click',()=>message(true));close.addEventListener('click',()=>message(false));panel.addEventListener('click',e=>{if(e.target===panel)message(false);});panel.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();message(false);}if(e.key==='Tab'){e.preventDefault();close.focus();}});
- button.addEventListener('pointerenter',()=>{held=true;});button.addEventListener('pointerleave',()=>{held=false;});button.addEventListener('focus',()=>{held=true;});button.addEventListener('blur',()=>{held=false;});
+ // Keep drifting after the creator dialog closes, even while the button retains focus.
  function limb(points,width,color){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(...points[0]);for(const p of points.slice(1))ctx.lineTo(...p);ctx.stroke();}
  function draw(t,direction){if(!ctx)return;ctx.setTransform(2,0,0,2,0,0);ctx.clearRect(0,0,88,132);const white=root.dataset.medium!=='voice',color=white?'#f2f4f5':'#182126',shade=color;ctx.save();if(direction<0){ctx.translate(88,0);ctx.scale(-1,1);}
  // The silhouette stays in one relaxed pose; only the whole character floats.
@@ -234,21 +234,29 @@ select(medium,false);motion(false);
  ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(5,34);ctx.bezierCurveTo(12,0,76,0,83,34);ctx.quadraticCurveTo(72,26,63,35);ctx.quadraticCurveTo(53,27,44,35);ctx.quadraticCurveTo(34,27,25,35);ctx.quadraticCurveTo(15,27,5,34);ctx.closePath();ctx.fill();
  ctx.strokeStyle=shade;ctx.lineWidth=.65;ctx.beginPath();ctx.moveTo(44,9);ctx.quadraticCurveTo(30,15,25,34);ctx.moveTo(44,9);ctx.quadraticCurveTo(58,15,63,34);ctx.stroke();ctx.restore();
  }
- let lastPosition=null;
+ let lastPosition=null,lane=null,laneKey='',laneUpdated=-Infinity;
  function safePosition(desired,bounds){
-  const bw=button.getBoundingClientRect().width||44,bh=button.getBoundingClientRect().height||58,gap=12;
-  const maxX=Math.max(0,bounds.width-bw-gap),maxY=Math.max(0,bounds.height-bh-gap);
-  const obstacles=Array.from(root.querySelectorAll('.ri-selected,.ri-portal,.ri-engine-strip,.ri-nav,.ri-arrow,.ri-bottom-left,.ri-bottom-center,.ri-motion'))
-   .filter(n=>!n.hidden).map(n=>n.getBoundingClientRect()).filter(b=>b.width&&b.height)
-   .map(b=>({x:b.left-bounds.left-gap,y:b.top-bounds.top-gap,right:b.right-bounds.left+gap,bottom:b.bottom-bounds.top+gap}));
-  function allowed(p){return p.x>=gap&&p.y>=gap&&p.x<=maxX&&p.y<=maxY&&!obstacles.some(b=>p.x+bw>b.x&&p.x<b.right&&p.y+bh>b.y&&p.y<b.bottom);}
-  desired={x:Math.min(maxX,Math.max(gap,desired.x)),y:Math.min(maxY,Math.max(gap,desired.y))};
-  if(allowed(desired))return desired;
-  const xs=[gap,maxX,desired.x],ys=[gap,maxY,desired.y];
-  for(const b of obstacles){xs.push(b.x-bw-1,b.right+1);ys.push(b.y-bh-1,b.bottom+1);}
-  let best=null,score=Infinity;
-  for(const x of xs)for(const y of ys){const candidate={x,y};if(!allowed(candidate))continue;const distance=(x-desired.x)**2+(y-desired.y)**2;const continuity=lastPosition?((x-lastPosition.x)**2+(y-lastPosition.y)**2)*.15:0;if(distance+continuity<score){score=distance+continuity;best=candidate;}}
-  return best;
+  const bw=44,bh=44,gap=12,maxX=bounds.width-bw-gap,maxY=bounds.height-bh-gap;
+  const key=bounds.width+':'+bounds.height+':'+root.dataset.medium;
+  if(key!==laneKey||clock-laneUpdated>1){
+   laneKey=key;laneUpdated=clock;lane=null;
+   const obstacles=Array.from(root.querySelectorAll('.ri-selected,.ri-portal,.ri-engine-strip,.ri-nav,.ri-arrow,.ri-bottom-left,.ri-bottom-center,.ri-motion'))
+    .filter(n=>!n.hidden).map(n=>n.getBoundingClientRect()).filter(b=>b.width&&b.height)
+    .map(b=>({left:b.left-bounds.left-gap-bw,right:b.right-bounds.left+gap,top:b.top-bounds.top-gap-bh,bottom:b.bottom-bounds.top+gap}));
+   const ys=[gap,maxY,...obstacles.flatMap(b=>[b.top-1,b.bottom+1])].filter(y=>y>=gap&&y<=maxY).sort((a,b)=>a-b);
+   for(const y of ys){
+    let intervals=[[gap,maxX]];
+    for(const b of obstacles){if(y<=b.top||y>=b.bottom)continue;
+     intervals=intervals.flatMap(([l,r])=>b.right<=l||b.left>=r?[[l,r]]:[[l,Math.min(r,b.left-1)],[Math.max(l,b.right+1),r]].filter(([a,z])=>z>=a));
+    }
+    for(const [left,right] of intervals){const span=right-left;
+     if(!lane||span>lane.span)lane={left,right,y,span};
+    }
+   }
+  }
+  if(!lane)return null;
+  const phase=.5+.46*Math.sin(clock*.24-.85);
+  return {x:lane.left+lane.span*phase,y:lane.y};
  }
  function tick(now){frame=0;if(!root.isConnected)return;const dt=last?Math.min((now-last)/1000,.05):0;last=now;const moving=root.dataset.motion==='on'&&!reduced&&!held&&!opened;if(visible&&moving)clock+=dt;
   const bounds=track.getBoundingClientRect(),x=.5+.46*Math.sin(clock*.11-.85),direction=Math.cos(clock*.11-.85)>=0?1:-1;
@@ -371,9 +379,9 @@ html,body{height:100%;overflow:hidden}
 
 </style>
 <style>
-#rainy-immersive .ri-walker{width:44px;height:58px}
-#rainy-immersive .ri-walker-canvas{width:30px;height:45px;margin:0 auto}
-@media(max-width:700px){#rainy-immersive .ri-walker{width:44px;height:50px}#rainy-immersive .ri-walker-canvas{width:26px;height:39px}}
+#rainy-immersive .ri-walker{width:44px;height:44px}
+#rainy-immersive .ri-walker-canvas{width:20px;height:30px;margin:0 auto}
+@media(max-width:700px){#rainy-immersive .ri-walker{width:44px;height:44px}#rainy-immersive .ri-walker-canvas{width:18px;height:27px}}
 </style>
 <style>#rainy-immersive .ri-walker-track{inset:0!important;height:auto!important}</style>
 </body>
